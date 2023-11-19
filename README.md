@@ -12,9 +12,9 @@ When this app is running, all macOS that depends on AWDL such as some Handoff an
 
 3. This app requires root: set the binary ownership to `root` and set the setuid bit (e.g. `chmod u+s awdlkiller`).
 
-4. Copy `jamestut.awdlkiller.plist` to `/Library/LaunchDaemons`.
+4. Copy `jamestut.awdlkiller.plist` to `/Library/LaunchDaemons`. If the path of `awdlkiller` is not in `/usr/local/bin`, please adjust contents of this plist accordingly.
 
-
+5. Copy `manager.py` to your `$PATH` for easy management. This file can be renamed to anything.
 
 To set the service to start automatically, run:
 
@@ -23,5 +23,3 @@ sudo launchctl load -w /Library/LaunchDaemons/jamestut.awdlkiller.plist
 ```
 
 Replace `load` with `unload` to disable the service.
-
-
