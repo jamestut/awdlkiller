@@ -12,7 +12,7 @@ When this app is running, all macOS that depends on AWDL such as some Handoff an
 
 3. This app requires root: set the binary ownership to `root` and set the setuid bit (e.g. `chmod u+s awdlkiller`).
 
-4. Copy `jamestut.awdlkiller.plist` to `/Library/LaunchDaemons`. If the path of `awdlkiller` is not in `/usr/local/bin`, please adjust contents of this plist accordingly.
+4. Copy `jamestut.awdlkiller.plist` to `/Library/LaunchDaemons`. If the path of `awdlkiller` is not in `/usr/local/bin`, please adjust contents of this plist accordingly. Ensure that the `/Library/LaunchDaemons/jamestut.awdlkiller.plist` is owned by `root:wheel` and has the permission of `0644`.
 
 5. Copy `manager.py` to your `$PATH` for easy management. This file can be renamed to anything.
 
