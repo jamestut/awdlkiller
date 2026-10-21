@@ -8,5 +8,7 @@
     <string>/usr/local/bin/awdlkiller</string>
     <key>RunAtLoad</key>
     <true/>
+    <key>KeepAlive</key>
+    <true/>
 </dict>
 </plist>

@@ -6,11 +6,13 @@ When this app is running, all macOS that depends on AWDL such as some Handoff an
 
 # Installation (Automatic)
 
-Run the included `installer.py` in the `misc` folder. The installer will do the following:
+Build the binary with `make awdlkiller`, then run `sudo python3 misc/installer.py`. The installer will do the following:
 
 - Copy the `awdlkiller` to `/usr/local/bin`, setting it to be owned by `root:wheel`, and assigns setuid flag to it.
 - Copy the `jamestut.awdlkiller.plist` to `/Library/LaunchDaemons` and activate automatic start.
 - Copy the `manager.py` to `/usr/local/bin/awdl`, and setting it to be owned by `root:wheel`.
+
+Rerun the installer to update changed files or repair permissions. It reloads the system LaunchDaemon after installing changes and reports launchctl failures. Installation enables the daemon, which disables AWDL.
 
 ## Note
 
@@ -24,8 +26,8 @@ Run the included `installer.py` in the `misc` folder. The installer will do the 
 2. Make the binary executable (`sudo chmod +x awdlkiller`).
 
 3. This app requires root.
-   - Set the binary ownership to `root` (`sudo chown root awdlkiller`).
-   - Set the setuid bit (`sudo chmod u+s awdlkiller`).
+   - The system LaunchDaemon already runs as root; setuid is not required for it.
+   - To allow directly running the binary without `sudo`, set root ownership (`sudo chown root awdlkiller`) and the setuid bit (`sudo chmod u+s awdlkiller`). The automatic installer currently enables this option.
 
 4. Copy `jamestut.awdlkiller.plist` to `/Library/LaunchDaemons`.
    - If the path of `awdlkiller` is not in `/usr/local/bin`, please adjust contents of this plist accordingly.
@@ -37,9 +39,17 @@ Run the included `installer.py` in the `misc` folder. The installer will do the 
 To set the service to start automatically, run:
 
 ```
-sudo launchctl load -w /Library/LaunchDaemons/jamestut.awdlkiller.plist
+sudo launchctl enable system/jamestut.awdlkiller
+sudo launchctl bootstrap system /Library/LaunchDaemons/jamestut.awdlkiller.plist
 ```
 
-Replace `load` with `unload` to disable the service.
+If the service is already loaded, skip `bootstrap`. To disable automatic startup and stop a loaded service, run:
+
+```
+sudo launchctl disable system/jamestut.awdlkiller
+sudo launchctl bootout system/jamestut.awdlkiller
+sudo ifconfig awdl0 up
+```
 
 The included `manager.py` script provides an easy way to enable and disable the awdlkiller. It does so via `launchctl`.
+Use `awdl off` to start the killer and disable AWDL, `awdl on` to stop the killer and bring AWDL up, and `awdl status` to check the interface's administrative state. The on/off choice persists across reboots. The plist keeps the daemon running, retrying if it exits (including when `awdl0` is not yet available during boot).
