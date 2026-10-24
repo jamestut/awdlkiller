@@ -15,22 +15,38 @@
 
 #define TARGETIFNAM "awdl0"
 
-uint8_t rtmsgbuff[sizeof(struct rt_msghdr) + sizeof(struct if_msghdr)];
+// Large enough for any routing message; short reads truncate the message.
+static uint8_t rtmsgbuff[2048];
 
-int main() {
-	// check root
-	if (getuid() != 0) {
-		// try setuid
-		if (setuid(0) < 0) {
-			errx(1, "Error escalating permission to root. Either run this app as root"
-				" or set setuid bit with root permission.");
-		}
+// Read the interface's current flags and clear IFF_UP if set.
+// Always uses fresh flags so concurrent flag changes are not clobbered.
+// Returns 0 on success (or already down), -1 with errno set on failure.
+static int awdl_down(int iocfd) {
+	struct ifreq ifr;
+	memset(&ifr, 0, sizeof(ifr));
+	strlcpy(ifr.ifr_name, TARGETIFNAM, sizeof(ifr.ifr_name));
+
+	if (ioctl(iocfd, SIOCGIFFLAGS, &ifr) < 0) {
+		return -1;
+	}
+	if (!(ifr.ifr_flags & IFF_UP)) {
+		return 0;
+	}
+	ifr.ifr_flags &= ~IFF_UP;
+	return ioctl(iocfd, SIOCSIFFLAGS, &ifr);
+}
+
+int main(void) {
+	// Effective UID 0 is required: either run as root (e.g. via launchd)
+	// or via a root-owned setuid binary.
+	if (geteuid() != 0) {
+		errx(1, "Must run as root (or as a root-owned setuid binary).");
 	}
 
 	// get interface ID
-	int ifidx = if_nametoindex(TARGETIFNAM);
+	unsigned int ifidx = if_nametoindex(TARGETIFNAM);
 	if (!ifidx) {
-		err(1, "Error getting interface name");
+		err(1, "Error getting index of " TARGETIFNAM);
 	}
 
 	// socket to monitor network interface changes
@@ -48,24 +64,13 @@ int main() {
 		err(1, "Error creating AF_INET socket");
 	}
 
-	struct ifreq ifr = {0};
-	strlcpy(ifr.ifr_name, TARGETIFNAM, IFNAMSIZ);
-
 	// kill awdl on program startup straight away!
-	if (ioctl(iocfd, SIOCGIFFLAGS, &ifr) < 0) {
-		err(1, "Error getting initial flags");
-	}
-	if (ifr.ifr_flags & IFF_UP) {
-		ifr.ifr_flags &= ~IFF_UP;
-		if (ioctl(iocfd, SIOCSIFFLAGS, &ifr) < 0) {
-			err(1, "Error initial disable interface");
-		}
+	if (awdl_down(iocfd) < 0) {
+		err(1, "Error initially disabling " TARGETIFNAM);
 	}
 
-	struct pollfd prt;
-	prt.fd = rtfd;
-	prt.events = POLLIN;
-	for(;;) {
+	struct pollfd prt = { .fd = rtfd, .events = POLLIN };
+	for (;;) {
 		if (poll(&prt, 1, -1) < 0) {
 			if (errno == EINTR) {
 				continue;
@@ -73,38 +78,55 @@ int main() {
 			err(1, "Error polling AF_ROUTE socket");
 		}
 
-		// for all queued reads, we take the final value flag and do SIOCSIFFLAGS once
-		int ifflag = 0;
-		for(ssize_t len = 0;;) {
-			len = read(rtfd, rtmsgbuff, sizeof(rtmsgbuff));
+		// Drain all queued messages, then act at most once.
+		int need_check = 0;
+		for (;;) {
+			ssize_t len = read(rtfd, rtmsgbuff, sizeof(rtmsgbuff));
 			if (len < 0) {
 				if (errno == EINTR) {
 					continue;
-				} else if (errno == EAGAIN) {
+				} else if (errno == EAGAIN || errno == EWOULDBLOCK) {
 					break;
+				} else if (errno == ENOBUFS) {
+					// Socket overflowed and messages were lost: resync.
+					need_check = 1;
+					continue;
 				}
 				err(1, "Error reading AF_ROUTE socket");
 			}
 
-			struct rt_msghdr * rtmsg = (void *)rtmsgbuff;
-			if (rtmsg->rtm_type != RTM_IFINFO) {
+			struct rt_msghdr *rtmsg = (void *)rtmsgbuff;
+			if ((size_t)len < sizeof(struct if_msghdr)
+				|| rtmsg->rtm_version != RTM_VERSION
+				|| rtmsg->rtm_type != RTM_IFINFO) {
 				continue;
 			}
 
-			struct if_msghdr * ifmsg = (void *)rtmsg;
+			struct if_msghdr *ifmsg = (void *)rtmsgbuff;
 			if (ifmsg->ifm_index != ifidx) {
-				// not the interface that we want
-				continue;
+				// awdl0 may have been recreated with a new index.
+				unsigned int cur = if_nametoindex(TARGETIFNAM);
+				if (!cur || cur == ifidx || ifmsg->ifm_index != cur) {
+					continue;
+				}
+				ifidx = cur;
 			}
 
-			ifflag = ifmsg->ifm_flags;
+			if (ifmsg->ifm_flags & IFF_UP) {
+				need_check = 1;
+			}
 		}
 
-		if (ifflag & IFF_UP) {
-			// AWDL is up (and running)! We must stop it!
-			ifr.ifr_flags = ifflag & ~IFF_UP;
-			if (ioctl(iocfd, SIOCSIFFLAGS, &ifr) < 0) {
-				err(1, "Error turning down interface");
+		if (need_check && awdl_down(iocfd) < 0) {
+			int saved_errno = errno;
+			// Don't exit: a respawn is throttled by launchd and would leave
+			// AWDL up in the meantime. The next event retries.
+			warn("Error turning down " TARGETIFNAM);
+			if (saved_errno == ENXIO) {
+				unsigned int cur = if_nametoindex(TARGETIFNAM);
+				if (cur) {
+					ifidx = cur;
+				}
 			}
 		}
 	}

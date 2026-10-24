@@ -8,13 +8,16 @@ When this app is running, all macOS that depends on AWDL such as some Handoff an
 
 Build the binary with `make awdlkiller`, then run `sudo python3 misc/installer.py`. The installer will do the following:
 
-- Copy the `awdlkiller` to `/usr/local/bin`, setting it to be owned by `root:wheel`, and assigns setuid flag to it.
+- Copy the `awdlkiller` to `/usr/local/bin`, setting it to be owned by `root:wheel` (no setuid; the LaunchDaemon already runs as root).
 - Copy the `jamestut.awdlkiller.plist` to `/Library/LaunchDaemons` and activate automatic start.
 - Copy the `manager.py` to `/usr/local/bin/awdl`, and setting it to be owned by `root:wheel`.
 
 Rerun the installer to update changed files or repair permissions. It reloads the system LaunchDaemon after installing changes and reports launchctl failures. Installation enables the daemon, which disables AWDL.
 
 ## Note
+
+- The installer refuses to install if `/usr/local/bin` (or any parent) is writable by a non-root user, e.g. on Intel Macs where Homebrew owns `/usr/local`. A root LaunchDaemon in such a directory lets that user replace the binary and gain root. Fix the ownership (`sudo chown root:wheel /usr/local/bin && sudo chmod go-w /usr/local/bin`) or change `BIN_TARGET_DIR` and the plist's `Program` path.
+- Errors are logged to `/var/log/awdlkiller.log`.
 
 - Both the installer and the manager script requires Python 3. Install Python 3 using `xcode-select --install`.
 - The installer cannot do uninstallation at the moment. You have to reverse the above steps manually to uninstall.
@@ -27,7 +30,9 @@ Rerun the installer to update changed files or repair permissions. It reloads th
 
 3. This app requires root.
    - The system LaunchDaemon already runs as root; setuid is not required for it.
-   - To allow directly running the binary without `sudo`, set root ownership (`sudo chown root awdlkiller`) and the setuid bit (`sudo chmod u+s awdlkiller`). The automatic installer currently enables this option.
+   - To allow directly running the binary without `sudo`, set root ownership (`sudo chown root awdlkiller`) and the setuid bit (`sudo chmod u+s awdlkiller`). This lets any local user disable AWDL, so the automatic installer does not do this.
+
+   - Make sure the directory holding the binary is not writable by non-root users.
 
 4. Copy `jamestut.awdlkiller.plist` to `/Library/LaunchDaemons`.
    - If the path of `awdlkiller` is not in `/usr/local/bin`, please adjust contents of this plist accordingly.

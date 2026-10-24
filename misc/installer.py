@@ -27,6 +27,11 @@ def main():
         print("Please run this installer as root.")
         return 1
 
+    # A root daemon must not live in a directory a non-root user can modify,
+    # otherwise that user can swap the binary and gain root on next launch.
+    for d in (BIN_TARGET_DIR, LaunchDaemonEntry.TARGET_DIR):
+        check_secure_dir(d)
+
     for todo in (
         AwdlKillerDaemon,
         AwdlManager,
@@ -76,6 +81,31 @@ def generate_mod(suid, exec):
         fmod |= stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
     return fmod
 
+def check_secure_dir(dirpath):
+    """Ensure dirpath and every ancestor is root-owned and not writable by
+    group or others. Missing directories are skipped (they will be created
+    by root with a safe mode)."""
+    cur = path.realpath(dirpath)
+    while True:
+        try:
+            s = os.stat(cur)
+        except FileNotFoundError:
+            s = None
+        if s is not None:
+            if s.st_uid != 0 or s.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                raise PermissionError(
+                    f"'{cur}' is not exclusively root-writable "
+                    f"(owner uid {s.st_uid}, mode {stat.S_IMODE(s.st_mode):o}). "
+                    "A root daemon installed under it could be replaced by a "
+                    "non-root user. Fix with e.g. "
+                    f"'sudo chown root:wheel {cur} && sudo chmod go-w {cur}', "
+                    "or use a different BIN_TARGET_DIR."
+                )
+        parent = path.dirname(cur)
+        if parent == cur:
+            return
+        cur = parent
+
 def check_permission(filename, *, fmod):
     try:
         s = os.lstat(filename)
@@ -116,13 +146,13 @@ class InstallerBase:
         os.makedirs(BIN_TARGET_DIR, exist_ok=True)
 
 class AwdlKillerDaemon(InstallerBase):
-    install_desc = "Install 'awdlkiller' to '/usr/local/bin' and set root setuid."
+    install_desc = "Install 'awdlkiller' to '/usr/local/bin' (root-owned, no setuid)."
 
     AWDLKILLER_NAME = 'awdlkiller'
     AWDLKILLER_TARGET_PATH = path.join(BIN_TARGET_DIR, AWDLKILLER_NAME)
     TARGET_PATH = AWDLKILLER_TARGET_PATH
     SOURCE_PATH = path.join(SOURCE_DIR, '..', AWDLKILLER_NAME)
-    FMOD = generate_mod(suid=True, exec=True)
+    FMOD = generate_mod(suid=False, exec=True)
 
     @classmethod
     def do_install(cls):
@@ -150,7 +180,8 @@ class LaunchDaemonEntry(InstallerBase):
     install_desc = "Install 'jamestut.awdlkiller.plist' to '/Library/LaunchDaemons'."
 
     LAUNCHD_NAME = 'jamestut.awdlkiller.plist'
-    LAUNCHD_TARGET_PATH = path.join('/Library/LaunchDaemons', LAUNCHD_NAME)
+    TARGET_DIR = '/Library/LaunchDaemons'
+    LAUNCHD_TARGET_PATH = path.join(TARGET_DIR, LAUNCHD_NAME)
     TARGET_PATH = LAUNCHD_TARGET_PATH
     SOURCE_PATH = path.join(SOURCE_DIR, LAUNCHD_NAME)
     FMOD = generate_mod(suid=False, exec=False)
