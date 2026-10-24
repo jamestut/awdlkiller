@@ -10,5 +10,7 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>StandardErrorPath</key>
+    <string>/var/log/awdlkiller.log</string>
 </dict>
 </plist>
